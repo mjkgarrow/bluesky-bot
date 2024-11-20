@@ -1,2 +1,2 @@
 [functions."blueskyBot"]
-schedule = "*/15 * * * *"
+schedule = "* * * * *"
