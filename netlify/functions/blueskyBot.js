@@ -1,9 +1,15 @@
-const { AtpAgent } = require("@atproto/api");
-const axios = require("axios");
-const Parser = require("rss-parser");
-import dotenv from "dotenv";
+// const { AtpAgent } = require("@atproto/api");
+// const axios = require("axios");
+// const Parser = require("rss-parser");
+// import dotenv from "dotenv";
 
-dotenv.config();
+// dotenv.config();
+
+const { AtpAgent } = require("@atproto/api");
+const Parser = require("rss-parser");
+const axios = require("axios");
+
+require("dotenv").config();
 const parser = new Parser();
 
 // Create a Bluesky Agent
