@@ -1,10 +1,3 @@
-// const { AtpAgent } = require("@atproto/api");
-// const axios = require("axios");
-// const Parser = require("rss-parser");
-// import dotenv from "dotenv";
-
-// dotenv.config();
-
 const { AtpAgent } = require("@atproto/api");
 const Parser = require("rss-parser");
 const axios = require("axios");
@@ -51,6 +44,9 @@ async function getLatestArticles(feed, auth) {
 
   const latestArticles = feed.items.filter((article) => {
     const pubDate = new Date(article.pubDate).getTime();
+    console.log(
+      `local time: ${now}, cutoff time ${cutoffTime}, pubdate: ${pubDate}`
+    );
     return pubDate > cutoffTime && pubDate <= now;
   });
 
@@ -62,6 +58,7 @@ async function getLatestArticles(feed, auth) {
       const title = article.title || "";
       const summary = article.summary || title;
       let imgDetails = {};
+
       try {
         const imgURL = await getImgDetails(link);
 
@@ -93,6 +90,88 @@ async function getLatestArticles(feed, auth) {
       return details;
     })
   );
+
+  // const articleDetails = await Promise.all(
+  //   latestArticles.map(async (article) => {
+  //     const link = article.link || "";
+  //     const title = article.title || "";
+  //     const summary = article.summary || title;
+
+  //     const details = {
+  //       $type: "app.bsky.feed.post",
+  //       text: summary,
+  //       createdAt: new Date().toISOString(),
+  //       embed: {
+  //         $type: "app.bsky.embed.external",
+  //         external: {
+  //           uri: link,
+  //           title,
+  //           description: summary,
+  //         },
+  //       },
+  //     };
+
+  //     return details;
+  //   })
+  // );
+
+  // const articleImgLinks = await Promise.all(
+  //   articleDetails.map(async (article) => {
+  //     const link = article.embed.external.uri;
+
+  //     const imgURL = await getImgDetails(link);
+
+  //     const details = { ...article, thumb: imgURL };
+
+  //     return details;
+  //   })
+  // );
+
+  // const articleBuffers = await Promise.all(
+  //   articleImgLinks.map(async (article) => {
+  //     const imgURL = article.thumb;
+
+  //     const { imageBuffer, contentType } = await getImageBuffer(imgURL);
+
+  //     const details = { ...article, thumb: { imageBuffer, contentType } };
+
+  //     return details;
+  //   })
+  // );
+
+  // const articleBlobs = await Promise.all(
+  //   articleBuffers.map(async (article) => {
+  //     const { imageBuffer, contentType } = article.thumb;
+  //     let imgDetails = {};
+
+  //     try {
+  //       imgDetails = await uploadImgToBsky(imageBuffer, contentType, auth);
+  //     } catch (error) {
+  //       console.error(`Failed to get image details for link ${link}:`, error);
+  //     }
+
+  //     const details = {
+  //       $type: article.$type,
+  //       text: article.text,
+  //       createdAt: article.createdAt,
+  //       embed: {
+  //         $type: article.embed.$type,
+  //         external: {
+  //           uri: article.embed.external.uri,
+  //           title: article.embed.external.title,
+  //           description: article.embed.external.description,
+  //         },
+  //       },
+  //     };
+
+  //     if (imgDetails?.blob) {
+  //       details.embed.external.thumb = imgDetails.blob;
+  //     }
+
+  //     return details;
+  //   })
+  // );
+  // return articleBlobs;
 
   return articleDetails;
 }
