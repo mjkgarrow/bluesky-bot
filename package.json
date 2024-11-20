@@ -9,6 +9,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@netlify/functions": "^2.8.2"
+    "@atproto/api": "^0.13.16",
+    "@netlify/functions": "^2.8.2",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "rss-parser": "^3.13.0"
   }
 }
