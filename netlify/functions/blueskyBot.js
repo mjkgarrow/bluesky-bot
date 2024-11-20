@@ -47,7 +47,7 @@ async function getLatestArticles(feed, auth) {
     console.log(
       `local time: ${now}, cutoff time ${cutoffTime}, pubdate: ${pubDate}`
     );
-    return pubDate > cutoffTime && pubDate <= now;
+    return pubDate >= cutoffTime;
   });
 
   if (!latestArticles.length) console.log("No new articles");
