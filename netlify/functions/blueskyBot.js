@@ -50,9 +50,16 @@ async function getLatestArticles(feed, auth) {
     return pubDate >= cutoffTime;
   });
 
-  if (!latestArticles.length) console.log("No new articles");
+  if (!latestArticles.length) {
+    console.log("No new articles");
+    return [];
+  }
 
-  console.log(`${latestArticles.length} new articles`);
+  console.log(
+    `${latestArticles.length} new article${
+      latestArticles.length > 1 ? "s" : ""
+    }`
+  );
 
   const articleDetails = await Promise.all(
     latestArticles.map(async (article) => {
