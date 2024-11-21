@@ -52,6 +52,8 @@ async function getLatestArticles(feed, auth) {
 
   if (!latestArticles.length) console.log("No new articles");
 
+  console.log(`${latestArticles.length} new articles`);
+
   const articleDetails = await Promise.all(
     latestArticles.map(async (article) => {
       const link = article.link || "";
@@ -299,7 +301,7 @@ async function BlueskyAuth() {
 async function postArticle(article) {
   await agent.post(article);
   console.log(
-    `Article posted at ${new Date().toLocaleString()}:, ${article.text.slice(
+    `Attempting post @ ${new Date().toLocaleString()}:, ${article.text.slice(
       0,
       30
     )}...`
