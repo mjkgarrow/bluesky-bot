@@ -308,7 +308,7 @@ async function BlueskyAuth() {
 }
 
 async function postArticle(article) {
-  // await agent.post(article);
+  await agent.post(article);
   console.log(
     `Attempting post @ ${new Date().toLocaleString()}:, ${article.text.slice(
       0,
