@@ -44,9 +44,11 @@ async function getLatestArticles(feed, auth) {
 
   const latestArticles = feed.items.filter((article) => {
     const pubDate = new Date(article.pubDate).getTime();
-    // console.log(
-    //   `Cutoff time ${cutoffTime}, pubdateTime: ${pubDate}, pubdate: ${article.pubDate}`
-    // );
+    console.log(
+      `Cutoff time ${cutoffTime}, pubdateTime: ${pubDate}, pubdate: ${
+        article.pubDate
+      }, diff: ${((cutoffTime - pubDate) / 1000 / 60).toFixed(0)} minutes`
+    );
     return pubDate >= cutoffTime;
   });
 
@@ -306,7 +308,7 @@ async function BlueskyAuth() {
 }
 
 async function postArticle(article) {
-  await agent.post(article);
+  // await agent.post(article);
   console.log(
     `Attempting post @ ${new Date().toLocaleString()}:, ${article.text.slice(
       0,
