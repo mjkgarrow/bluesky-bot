@@ -44,9 +44,9 @@ async function getLatestArticles(feed, auth) {
 
   const latestArticles = feed.items.filter((article) => {
     const pubDate = new Date(article.pubDate).getTime();
-    console.log(
-      `Cutoff time ${cutoffTime}, pubdateTime: ${pubDate}, pubdate: ${article.pubDate}`
-    );
+    // console.log(
+    //   `Cutoff time ${cutoffTime}, pubdateTime: ${pubDate}, pubdate: ${article.pubDate}`
+    // );
     return pubDate >= cutoffTime;
   });
 
