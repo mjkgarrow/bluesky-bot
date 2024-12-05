@@ -1,4 +1,4 @@
-const { BskyAgent } = require("@atproto/api");
+const { AtpAgent } = require("@atproto/api");
 const RSSParser = require("rss-parser");
 const axios = require("axios");
 const parser = new RSSParser();
@@ -6,7 +6,7 @@ const sharp = require("sharp");
 
 require("dotenv").config();
 
-const agent = new BskyAgent({
+const agent = new AtpAgent({
   service: "https://bsky.social",
 });
 
@@ -43,7 +43,7 @@ function getNewArticles(rssFeed, jsonLinks) {
     .reverse();
 }
 
-async function getImageBlob(link, maxSizeInBytes = 1024 * 1024) {
+async function getImageBlob(link, title, maxSizeInBytes = 1024 * 1024) {
   try {
     const { data } = await axios.get(link, { responseType: "text" });
 
@@ -69,7 +69,10 @@ async function getImageBlob(link, maxSizeInBytes = 1024 * 1024) {
     // Resize and compress iteratively until size is under 1MB
     do {
       console.log(
-        `Image too big, resizing - quality: ${quality}, width: ${width}`
+        `"${title.slice(
+          0,
+          20
+        )}..." image too big, resizing - quality: ${quality}, width: ${width}`
       );
 
       resizedImageBuffer = await sharp(imageBuffer)
@@ -90,7 +93,8 @@ async function getImageBlob(link, maxSizeInBytes = 1024 * 1024) {
       }
     } while (resizedImageBuffer.length > maxSizeInBytes);
 
-    console.log("Image successfully resized under 1MB");
+    console.log(`"${title.slice(0, 20)}..." image resized under 1MB`);
+
     return { imageBuffer: resizedImageBuffer, contentType };
   } catch (error) {
     console.error("getImageBlob error", error.message);
@@ -114,7 +118,9 @@ async function uploadImgToBsky(imageBuffer, contentType) {
 
 async function generateArticleData(feed) {
   // First stage: Fetch all image blobs concurrently
-  const imageBlobPromises = feed.map((item) => getImageBlob(item.link));
+  const imageBlobPromises = feed.map((item) =>
+    getImageBlob(item.link, item.title)
+  );
 
   const imageBlobs = await Promise.all(imageBlobPromises);
 
@@ -161,6 +167,7 @@ async function postArticle(article) {
   try {
     await agent.post(article);
     console.log("Article posted:", article.text);
+    return true;
   } catch (error) {
     console.error("postArticle error", error);
     return null;
@@ -176,8 +183,9 @@ async function processArticles(newArticles) {
 
     const newArticleData = await generateArticleData(newArticles);
 
-    for (const article of newArticleData) {
-      await postArticle(article);
+    for (let i = 0; i < newArticleData.length; i++) {
+      let success = await postArticle(newArticleData[i]);
+      newArticleData[i].success = success;
     }
 
     return newArticleData;
@@ -191,36 +199,6 @@ async function updateGitHubJSON(content, authToken) {
   const apiUrl = process.env.GITHUB_JSON_API_URL;
 
   try {
-    // // Get the SHA of the existing file
-    // const getResponse = await axios.get(apiUrl, {
-    //   headers: {
-    //     Authorization: `token ${authToken}`,
-    //     Accept: "application/vnd.github.v3+json",
-    //   },
-    // });
-
-    // const sha = getResponse.data.sha;
-
-    // // Update the file
-    // const updateResponse = await axios.put(
-    //   apiUrl,
-    //   {
-    //     owner: "mjkgarrow",
-    //     repo: "TC-RSS",
-    //     path: "links.json",
-    //     message: "Update JSON file with new links",
-    //     content: Buffer.from(JSON.stringify(content)).toString("base64"),
-    //     sha: sha,
-    //   },
-    //   {
-    //     headers: {
-    //       Authorization: `token ${authToken}`,
-    //       Accept: "application/vnd.github.v3+json",
-    //     },
-    //   }
-    // );
-
-    // if (updateResponse.status === 200) console.log("JSON links updated!");
     const getResponse = await axios.get(apiUrl, {
       headers: {
         Authorization: `token ${authToken}`,
@@ -265,16 +243,17 @@ async function main() {
 
     const newArticles = getNewArticles(rssFeed, jsonLinks);
 
-    const newLinks = newArticles.map((item) => item.link);
-
     if (newArticles.length > 0) {
       // Process new links
       const processedArticles = await processArticles(newArticles);
 
-      if (!processedArticles) return;
+      // extract the article links that were posted
+      const postedArticleLinks = processedArticles
+        .filter((article) => article.success === true)
+        .map((item) => item.embed.external.uri);
 
       // Update the GitHub JSON file
-      const updatedLinks = [...newLinks, ...jsonLinks].slice(0, 50);
+      const updatedLinks = [...postedArticleLinks, ...jsonLinks].slice(0, 50);
       await updateGitHubJSON(updatedLinks, process.env.GITHUB_PAT);
 
       return updatedLinks;
