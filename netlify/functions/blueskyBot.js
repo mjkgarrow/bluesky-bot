@@ -253,7 +253,9 @@ async function main() {
       fetchGitHubJSON(process.env.GITHUB_JSON_RAW_URL),
     ]);
 
-    // Find new links
+    console.log(rssFeed.items);
+    console.log(jsonLinks);
+
     const newArticles = getNewArticles(rssFeed, jsonLinks);
 
     const newLinks = newArticles.map((item) => item.link);
