@@ -1,220 +1,59 @@
-const { AtpAgent } = require("@atproto/api");
-const Parser = require("rss-parser");
+const { BskyAgent } = require("@atproto/api");
+const RSSParser = require("rss-parser");
 const axios = require("axios");
+const parser = new RSSParser();
 
 require("dotenv").config();
-const parser = new Parser();
 
-// Create a Bluesky Agent
-const agent = new AtpAgent({
+const agent = new BskyAgent({
   service: "https://bsky.social",
 });
 
-async function getRSS() {
-  // RSS keys: [ 'items', 'link', 'feedUrl', 'title', 'lastBuildDate' ]
+async function fetchRSSFeed(url) {
   try {
-    const rssURL = process.env.AU_RSS_FEED;
-    const response = await axios.get(rssURL);
-    const rssFeed = await parser.parseString(response.data);
-    return rssFeed;
+    const feed = await parser.parseURL(url);
+    return feed;
   } catch (error) {
-    // Mute exception handling
-    if (error.response) {
-      // Server responded with a status outside of 2xx
-      console.log("HTTP Error:", error.response.status, error.response.data);
-    } else if (error.request) {
-      // No response received
-      console.log("No response received:", error.request);
-    } else {
-      // Other errors, e.g., request setup
-      console.log("Error", error.message);
-    }
+    console.error("fetchRSSFeed error:", error);
+    throw error;
   }
 }
 
-async function getLatestArticles(feed, auth) {
-  if (!feed.items.length || !auth.did || !auth.token) {
-    console.log("Empty feed");
-    return;
-  }
-
-  const now = Date.now();
-  const timespan = process.env.INTERVAL * 60 * 1000;
-  const cutoffTime = now - timespan;
-
-  const latestArticles = feed.items.filter((article) => {
-    const pubDate = new Date(article.pubDate).getTime();
-    console.log(
-      `Cutoff time ${cutoffTime}, pubdateTime: ${pubDate}, pubdate: ${
-        article.pubDate
-      }, diff: ${((cutoffTime - pubDate) / 1000 / 60).toFixed(0)} minutes`
-    );
-    return pubDate >= cutoffTime;
-  });
-
-  if (!latestArticles.length) {
-    console.log("No new articles");
-    return [];
-  }
-
-  console.log(
-    `${latestArticles.length} new article${
-      latestArticles.length > 1 ? "s" : ""
-    }`
-  );
-
-  const articleDetails = await Promise.all(
-    latestArticles.map(async (article) => {
-      const link = article.link || "";
-      const title = article.title || "";
-      const summary = article.summary || title;
-      let imgDetails = {};
-
-      try {
-        const imgURL = await getImgDetails(link);
-
-        const { imageBuffer, contentType } = await getImageBuffer(imgURL);
-
-        imgDetails = await uploadImgToBsky(imageBuffer, contentType, auth);
-      } catch (error) {
-        console.error(`Failed to get image details for link ${link}:`, error);
-      }
-
-      const details = {
-        $type: "app.bsky.feed.post",
-        text: summary,
-        createdAt: new Date().toISOString(),
-        embed: {
-          $type: "app.bsky.embed.external",
-          external: {
-            uri: link,
-            title,
-            description: summary,
-          },
-        },
-      };
-
-      if (imgDetails?.blob) {
-        details.embed.external.thumb = imgDetails.blob;
-      }
-
-      return details;
-    })
-  );
-
-  // const articleDetails = await Promise.all(
-  //   latestArticles.map(async (article) => {
-  //     const link = article.link || "";
-  //     const title = article.title || "";
-  //     const summary = article.summary || title;
-
-  //     const details = {
-  //       $type: "app.bsky.feed.post",
-  //       text: summary,
-  //       createdAt: new Date().toISOString(),
-  //       embed: {
-  //         $type: "app.bsky.embed.external",
-  //         external: {
-  //           uri: link,
-  //           title,
-  //           description: summary,
-  //         },
-  //       },
-  //     };
-
-  //     return details;
-  //   })
-  // );
-
-  // const articleImgLinks = await Promise.all(
-  //   articleDetails.map(async (article) => {
-  //     const link = article.embed.external.uri;
-
-  //     const imgURL = await getImgDetails(link);
-
-  //     const details = { ...article, thumb: imgURL };
-
-  //     return details;
-  //   })
-  // );
-
-  // const articleBuffers = await Promise.all(
-  //   articleImgLinks.map(async (article) => {
-  //     const imgURL = article.thumb;
-
-  //     const { imageBuffer, contentType } = await getImageBuffer(imgURL);
-
-  //     const details = { ...article, thumb: { imageBuffer, contentType } };
-
-  //     return details;
-  //   })
-  // );
-
-  // const articleBlobs = await Promise.all(
-  //   articleBuffers.map(async (article) => {
-  //     const { imageBuffer, contentType } = article.thumb;
-  //     let imgDetails = {};
-
-  //     try {
-  //       imgDetails = await uploadImgToBsky(imageBuffer, contentType, auth);
-  //     } catch (error) {
-  //       console.error(`Failed to get image details for link ${link}:`, error);
-  //     }
-
-  //     const details = {
-  //       $type: article.$type,
-  //       text: article.text,
-  //       createdAt: article.createdAt,
-  //       embed: {
-  //         $type: article.embed.$type,
-  //         external: {
-  //           uri: article.embed.external.uri,
-  //           title: article.embed.external.title,
-  //           description: article.embed.external.description,
-  //         },
-  //       },
-  //     };
-
-  //     if (imgDetails?.blob) {
-  //       details.embed.external.thumb = imgDetails.blob;
-  //     }
-
-  //     return details;
-  //   })
-  // );
-  // return articleBlobs;
-
-  return articleDetails;
-}
-
-async function getImgDetails(link) {
+async function fetchGitHubJSON(rawUrl) {
   try {
-    const response = await axios.get(link);
-    const html = response.data;
+    const response = await axios.get(rawUrl, {
+      owner: "mjkgarrow",
+      repo: "TC-RSS",
+      path: "links.json",
+      headers: {
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+
+    return JSON.parse(
+      Buffer.from(response.data.content, "base64").toString("utf8")
+    );
+  } catch (error) {
+    console.error("fetchGitHubJSON error:", error);
+    throw error;
+  }
+}
+
+function getNewArticles(rssFeed, jsonLinks) {
+  const jsonLinksSet = new Set(jsonLinks);
+  return rssFeed.items.filter((article) => !jsonLinksSet.has(article.link));
+}
+
+async function getImageBlob(link) {
+  try {
+    const res = await fetch(link);
+    const html = await res.text();
 
     const match = html.match(/<meta property="og:image" content="([^"]+)"/i);
 
-    return match ? match[1] : false;
-  } catch (error) {
-    // Mute exception handling
-    if (error.response) {
-      // Server responded with a status outside of 2xx
-      console.log("HTTP Error:", error.response.status, error.response.data);
-    } else if (error.request) {
-      // No response received
-      console.log("No response received:", error.request);
-    } else {
-      // Other errors, e.g., request setup
-      console.log("Error", error.message);
-    }
-  }
-}
+    if (!match) return;
 
-async function getImageBuffer(imgURL) {
-  if (!imgURL) return { imageBuffer: "", contentType: "" };
-
-  try {
-    const response = await axios.get(imgURL, {
+    const response = await axios.get(match[1], {
       responseType: "arraybuffer",
     });
 
@@ -223,133 +62,220 @@ async function getImageBuffer(imgURL) {
 
     return { imageBuffer, contentType };
   } catch (error) {
-    // Mute exception handling
-    if (error.response) {
-      // Server responded with a status outside of 2xx
-      console.log("HTTP Error:", error.response.status, error.response.data);
-    } else if (error.request) {
-      // No response received
-      console.log("No response received:", error.request);
+    console.error(`getImageBlob error: ${error}`);
+  }
+}
+
+async function resizeImageUntilAcceptable(imageBuffer, contentType) {
+  let resizedBuffer = imageBuffer;
+  let width = 2048; // Starting width
+  let quality = 90; // Starting quality
+  const format = contentType.includes("png") ? "png" : "jpeg";
+
+  while (true) {
+    resizedBuffer = await sharp(imageBuffer)
+      .resize({ width })
+      .toFormat(format, { quality })
+      .toBuffer();
+
+    // Check if the size is acceptable (below the maximum allowed size)
+    if (
+      resizedBuffer.length <= MAX_SIZE_IN_BYTES ||
+      width <= 500 ||
+      quality <= 50
+    ) {
+      break;
+    }
+
+    // Reduce width and quality for the next iteration
+    width -= 200;
+    quality -= 10;
+  }
+
+  return resizedBuffer;
+}
+
+async function uploadImgToBsky(imageBuffer, contentType) {
+  try {
+    // Attempt to upload the image
+    const { data } = await agent.uploadBlob(imageBuffer, {
+      encoding: contentType,
+    });
+
+    return data;
+  } catch (error) {
+    if (error.status === 400 && error.error === "BlobTooLarge") {
+      console.error("Image is too large:", error.message);
+
+      // Resize the image until acceptable
+      const resizedImageBuffer = await resizeImageUntilAcceptable(
+        imageBuffer,
+        contentType
+      );
+
+      // Retry uploading the resized image
+      try {
+        const { data } = await agent.uploadBlob(resizedImageBuffer, {
+          encoding: contentType,
+        });
+
+        return data;
+      } catch (retryError) {
+        console.error(`Error uploading resized image: ${retryError.message}`);
+        throw retryError;
+      }
     } else {
-      // Other errors, e.g., request setup
-      console.log("Error", error.message);
+      console.error(`uploadImgToBsky error: ${error.message}`);
+      throw error;
     }
   }
 }
 
-async function uploadImgToBsky(imageBuffer, contentType, auth) {
-  if (!imageBuffer || !contentType) return {};
-
-  try {
-    const blobOptions = {
-      method: "POST",
-      url: process.env.UPLOAD_IMG_URL,
-      headers: {
-        Authorization: `Bearer ${auth.token}`,
-        "Content-Type": contentType,
-      },
-      data: imageBuffer,
-    };
-
-    const response = await axios(blobOptions);
-
-    return response.data;
-  } catch (error) {
-    // Mute exception handling
-    if (error.response) {
-      // Server responded with a status outside of 2xx
-      console.log("HTTP Error:", error.response.status, error.response.data);
-    } else if (error.request) {
-      // No response received
-      console.log("No response received:", error.request);
-    } else {
-      // Other errors, e.g., request setup
-      console.log("Error", error.message);
+async function generateArticleData(feed) {
+  // First stage: Fetch all image blobs concurrently
+  const imageBlobPromises = feed.map(async (item) => {
+    try {
+      return await getImageBlob(item.link); // Ensure the result is awaited
+    } catch (error) {
+      console.error(`Error processing item ${item.link}:`, error);
+      return null; // Handle errors and return null for failed items
     }
-  }
-}
+  });
 
-async function BlueskyAuth() {
-  try {
-    // 1. Resolve handle
-    const handleUrl = encodeURI(
-      `${process.env.DID_URL}?handle=${process.env.BLUESKY_USERNAME}`
-    );
-    // Perform GET request to resolve handle
-    const handleRep = await axios.get(handleUrl);
-    const DID = handleRep.data.did;
+  const imageBlobs = await Promise.all(imageBlobPromises);
 
-    // 2. Get Token
-    const tokenOpt = {
-      method: "POST",
-      url: process.env.API_KEY_URL,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      data: {
-        identifier: DID,
-        password: process.env.BLUESKY_PASSWORD,
-      },
-    };
+  // Second stage: Process each resolved imageBlob
+  const articles = await Promise.all(
+    imageBlobs.map(async (imageBlob, index) => {
+      if (!imageBlob) return null; // Skip failed items
 
-    // Perform POST request to get the token
-    const tokenRep = await axios(tokenOpt);
-    const TOKEN = tokenRep.data.accessJwt;
+      const item = feed[index];
+      const link = item.link;
+      const title = item.title;
+      const summary = item.summary || title;
 
-    // Return the DID and token as an object
-    return { did: DID, token: TOKEN };
-  } catch (error) {
-    console.error(
-      "Error in BlueskyAuth:",
-      error.response ? error.response.data : error.message
-    );
-    throw error; // re-throw the error if needed
-  }
+      // Upload image to Bsky
+      const imageData = await uploadImgToBsky(
+        imageBlob.imageBuffer,
+        imageBlob.contentType
+      );
+
+      return {
+        $type: "app.bsky.feed.post",
+        text: summary,
+        createdAt: new Date().toISOString(),
+        embed: {
+          $type: "app.bsky.embed.external",
+          external: {
+            uri: link,
+            title: title,
+            description: summary,
+            thumb: imageData.blob,
+            // thumb: "",
+          },
+        },
+      };
+    })
+  );
+
+  // Filter out any null results
+  return articles.filter((article) => article !== null);
 }
 
 async function postArticle(article) {
   await agent.post(article);
-  console.log(
-    `Attempting post @ ${new Date().toLocaleString()}:, ${article.text.slice(
-      0,
-      30
-    )}...`
-  );
+  console.log("Article posted:", article.text);
 }
 
-async function publishFeed() {
+async function processArticles(newArticles) {
   try {
     await agent.login({
       identifier: process.env.BLUESKY_USERNAME,
       password: process.env.BLUESKY_PASSWORD,
     });
 
-    const auth = await BlueskyAuth();
+    const newArticleData = await generateArticleData(newArticles);
 
-    const rssFeed = await getRSS();
-    const latestArticles = await getLatestArticles(rssFeed, auth);
+    newArticleData
+      .reverse()
+      .forEach(async (article) => await postArticle(article));
 
-    const results = await Promise.allSettled(
-      latestArticles.map((article) => postArticle(article))
-    );
-
-    results.forEach((result, index) => {
-      if (result.status === "rejected") {
-        console.error(
-          `Failed to post article at index ${index}:`,
-          result.reason
-        );
-      } else {
-        console.log(`Successfully posted article at index ${index}`);
-      }
-    });
+    return newArticleData;
   } catch (error) {
-    console.log(error);
+    console.log("postArticle error", error);
   }
 }
 
-export default async (req) => {
-  await publishFeed();
-};
+async function updateGitHubJSON(content, authToken) {
+  const apiUrl = process.env.GITHUB_JSON_API_URL;
 
-// netlify functions:invoke blueskyBot --port 8888
+  try {
+    // Get the SHA of the existing file
+    const getResponse = await axios.get(apiUrl, {
+      headers: {
+        Authorization: `token ${authToken}`,
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+
+    const sha = getResponse.data.sha;
+
+    // Update the file
+    const updateResponse = await axios.put(
+      apiUrl,
+      {
+        owner: "mjkgarrow",
+        repo: "TC-RSS",
+        path: "links.json",
+        message: "Update JSON file with new links",
+        content: Buffer.from(JSON.stringify(content)).toString("base64"),
+        sha: sha,
+      },
+      {
+        headers: {
+          Authorization: `token ${authToken}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+      }
+    );
+
+    if (updateResponse.status === 200) console.log("JSON links updated!");
+  } catch (error) {
+    console.error("updateGitHubJSON errir:", error.response.data);
+  }
+}
+
+async function main() {
+  try {
+    // Fetch RSS feed and github JSON at the same time
+    const [rssFeed, jsonLinks] = await Promise.all([
+      fetchRSSFeed(process.env.RSS_FEED),
+      fetchGitHubJSON(process.env.GITHUB_JSON_RAW_URL),
+    ]);
+
+    // Find new links
+    const newArticles = getNewArticles(rssFeed, jsonLinks);
+
+    const newLinks = newArticles.map((item) => item.link);
+
+    if (newArticles.length > 0) {
+      // Process new links
+      await processArticles(newArticles);
+
+      // Update the GitHub JSON file
+      const updatedLinks = [...newLinks, ...jsonLinks].slice(0, 50);
+      await updateGitHubJSON(updatedLinks, process.env.GITHUB_PAT);
+    } else {
+      console.log("No new articles.");
+    }
+  } catch (error) {
+    console.error("main error:", error);
+  }
+}
+
+// main();
+
+export default async (req, _) => {
+  const publishedArticles = await main();
+  return Response.json({ articles: JSON.stringify(publishedArticles) });
+};
