@@ -2,6 +2,7 @@ const { BskyAgent } = require("@atproto/api");
 const RSSParser = require("rss-parser");
 const axios = require("axios");
 const parser = new RSSParser();
+const sharp = require("sharp");
 
 require("dotenv").config();
 
@@ -12,25 +13,19 @@ const agent = new BskyAgent({
 async function fetchRSSFeed(url) {
   try {
     const feed = await parser.parseURL(url);
-    feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)); // sort by date, latest first so it publishes latest and then earliest
+
+    feed.items.sort((a, b) => new Date(a.pubDate) - new Date(b.pubDate));
 
     return feed;
   } catch (error) {
     console.error("fetchRSSFeed error:", error);
-    throw error;
+    return null;
   }
 }
 
 async function fetchGitHubJSON(rawUrl) {
   try {
-    const response = await axios.get(rawUrl, {
-      owner: "mjkgarrow",
-      repo: "TC-RSS",
-      path: "links.json",
-      headers: {
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
+    const response = await axios.get(rawUrl);
 
     return JSON.parse(
       Buffer.from(response.data.content, "base64").toString("utf8")
@@ -43,58 +38,64 @@ async function fetchGitHubJSON(rawUrl) {
 
 function getNewArticles(rssFeed, jsonLinks) {
   const jsonLinksSet = new Set(jsonLinks);
-  return rssFeed.items.filter((article) => !jsonLinksSet.has(article.link));
+  return rssFeed.items
+    .filter((article) => !jsonLinksSet.has(article.link))
+    .reverse();
 }
 
-async function getImageBlob(link) {
+async function getImageBlob(link, maxSizeInBytes = 1024 * 1024) {
   try {
-    const res = await fetch(link);
-    const html = await res.text();
+    const { data } = await axios.get(link, { responseType: "text" });
 
-    const match = html.match(/<meta property="og:image" content="([^"]+)"/i);
+    const match = data.match(/<meta property="og:image" content="([^"]+)"/i);
 
-    if (!match) return;
+    if (!match || !match[1]) return null;
 
-    const response = await axios.get(match[1], {
-      responseType: "arraybuffer",
-    });
+    // Fetch the image as a binary buffer
+    const response = await axios.get(match[1], { responseType: "arraybuffer" });
+    let contentType = response.headers["content-type"];
 
-    const contentType = response.headers["content-type"];
-    const imageBuffer = Buffer.from(response.data);
+    let imageBuffer = response.data;
 
-    return { imageBuffer, contentType };
-  } catch (error) {
-    console.error(`getImageBlob error: ${error}`);
-  }
-}
-
-async function resizeImageUntilAcceptable(imageBuffer, contentType) {
-  let resizedBuffer = imageBuffer;
-  let width = 2048; // Starting width
-  let quality = 90; // Starting quality
-  const format = contentType.includes("png") ? "png" : "jpeg";
-
-  while (true) {
-    resizedBuffer = await sharp(imageBuffer)
-      .resize({ width })
-      .toFormat(format, { quality })
-      .toBuffer();
-
-    // Check if the size is acceptable (below the maximum allowed size)
-    if (
-      resizedBuffer.length <= MAX_SIZE_IN_BYTES ||
-      width <= 500 ||
-      quality <= 50
-    ) {
-      break;
+    // Check if the buffer is already under 1MB
+    if (imageBuffer.length <= maxSizeInBytes) {
+      return { imageBuffer, contentType };
     }
 
-    // Reduce width and quality for the next iteration
-    width -= 200;
-    quality -= 10;
-  }
+    let quality = 80; // Start with 80% quality
+    let width = 500; // Initial width for resizing
+    let resizedImageBuffer;
 
-  return resizedBuffer;
+    // Resize and compress iteratively until size is under 1MB
+    do {
+      console.log(
+        `Image too big, resizing - quality: ${quality}, width: ${width}`
+      );
+
+      resizedImageBuffer = await sharp(imageBuffer)
+        .resize({ width }) // Resize width while preserving aspect ratio
+        .jpeg({ quality }) // Compress with adjustable quality
+        .toBuffer();
+
+      contentType = "image/jpeg";
+
+      // Reduce quality or size for the next iteration
+      if (resizedImageBuffer.length > maxSizeInBytes) {
+        if (quality > 10) {
+          quality -= 10; // Decrease quality in steps
+        } else {
+          width -= 100; // Decrease width if quality is too low
+          if (width <= 0) throw new Error("Image cannot be resized under 1MB.");
+        }
+      }
+    } while (resizedImageBuffer.length > maxSizeInBytes);
+
+    console.log("Image successfully resized under 1MB");
+    return { imageBuffer: resizedImageBuffer, contentType };
+  } catch (error) {
+    console.error("getImageBlob error", error.message);
+    return null;
+  }
 }
 
 async function uploadImgToBsky(imageBuffer, contentType) {
@@ -106,50 +107,21 @@ async function uploadImgToBsky(imageBuffer, contentType) {
 
     return data;
   } catch (error) {
-    if (error.status === 400 && error.error === "BlobTooLarge") {
-      console.error("Image is too large:", error.message);
-
-      // Resize the image until acceptable
-      const resizedImageBuffer = await resizeImageUntilAcceptable(
-        imageBuffer,
-        contentType
-      );
-
-      // Retry uploading the resized image
-      try {
-        const { data } = await agent.uploadBlob(resizedImageBuffer, {
-          encoding: contentType,
-        });
-
-        return data;
-      } catch (retryError) {
-        console.error(`Error uploading resized image: ${retryError.message}`);
-        throw retryError;
-      }
-    } else {
-      console.error(`uploadImgToBsky error: ${error.message}`);
-      throw error;
-    }
+    console.error(`uploadImgToBsky error: ${error.message}`);
+    return null;
   }
 }
 
 async function generateArticleData(feed) {
   // First stage: Fetch all image blobs concurrently
-  const imageBlobPromises = feed.map(async (item) => {
-    try {
-      return await getImageBlob(item.link); // Ensure the result is awaited
-    } catch (error) {
-      console.error(`Error processing item ${item.link}:`, error);
-      return null; // Handle errors and return null for failed items
-    }
-  });
+  const imageBlobPromises = feed.map((item) => getImageBlob(item.link));
 
   const imageBlobs = await Promise.all(imageBlobPromises);
 
   // Second stage: Process each resolved imageBlob
   const articles = await Promise.all(
     imageBlobs.map(async (imageBlob, index) => {
-      if (!imageBlob) return null; // Skip failed items
+      if (!imageBlob || !imageBlob.imageBuffer) return null;
 
       const item = feed[index];
       const link = item.link;
@@ -162,6 +134,8 @@ async function generateArticleData(feed) {
         imageBlob.contentType
       );
 
+      if (!imageData || !imageData.blob) return null;
+
       return {
         $type: "app.bsky.feed.post",
         text: summary,
@@ -173,7 +147,6 @@ async function generateArticleData(feed) {
             title: title,
             description: summary,
             thumb: imageData.blob,
-            // thumb: "",
           },
         },
       };
@@ -185,8 +158,13 @@ async function generateArticleData(feed) {
 }
 
 async function postArticle(article) {
-  await agent.post(article);
-  console.log("Article posted:", article.text);
+  try {
+    await agent.post(article);
+    console.log("Article posted:", article.text);
+  } catch (error) {
+    console.error("postArticle error", error);
+    return null;
+  }
 }
 
 async function processArticles(newArticles) {
@@ -196,13 +174,16 @@ async function processArticles(newArticles) {
       password: process.env.BLUESKY_PASSWORD,
     });
 
-    const newArticleData = await generateArticleData(newArticles.reverse());
+    const newArticleData = await generateArticleData(newArticles);
 
-    newArticleData.forEach(async (article) => await postArticle(article));
+    for (const article of newArticleData) {
+      await postArticle(article);
+    }
 
     return newArticleData;
   } catch (error) {
-    console.log("postArticle error", error);
+    console.log("processArticles error", error);
+    return null;
   }
 }
 
@@ -210,7 +191,36 @@ async function updateGitHubJSON(content, authToken) {
   const apiUrl = process.env.GITHUB_JSON_API_URL;
 
   try {
-    // Get the SHA of the existing file
+    // // Get the SHA of the existing file
+    // const getResponse = await axios.get(apiUrl, {
+    //   headers: {
+    //     Authorization: `token ${authToken}`,
+    //     Accept: "application/vnd.github.v3+json",
+    //   },
+    // });
+
+    // const sha = getResponse.data.sha;
+
+    // // Update the file
+    // const updateResponse = await axios.put(
+    //   apiUrl,
+    //   {
+    //     owner: "mjkgarrow",
+    //     repo: "TC-RSS",
+    //     path: "links.json",
+    //     message: "Update JSON file with new links",
+    //     content: Buffer.from(JSON.stringify(content)).toString("base64"),
+    //     sha: sha,
+    //   },
+    //   {
+    //     headers: {
+    //       Authorization: `token ${authToken}`,
+    //       Accept: "application/vnd.github.v3+json",
+    //     },
+    //   }
+    // );
+
+    // if (updateResponse.status === 200) console.log("JSON links updated!");
     const getResponse = await axios.get(apiUrl, {
       headers: {
         Authorization: `token ${authToken}`,
@@ -220,15 +230,13 @@ async function updateGitHubJSON(content, authToken) {
 
     const sha = getResponse.data.sha;
 
-    // Update the file
     const updateResponse = await axios.put(
       apiUrl,
       {
-        owner: "mjkgarrow",
-        repo: "TC-RSS",
-        path: "links.json",
         message: "Update JSON file with new links",
-        content: Buffer.from(JSON.stringify(content)).toString("base64"),
+        content: Buffer.from(JSON.stringify(content, null, 2)).toString(
+          "base64"
+        ),
         sha: sha,
       },
       {
@@ -241,7 +249,7 @@ async function updateGitHubJSON(content, authToken) {
 
     if (updateResponse.status === 200) console.log("JSON links updated!");
   } catch (error) {
-    console.error("updateGitHubJSON errir:", error.response.data);
+    console.error("updateGitHubJSON error:", error);
   }
 }
 
@@ -253,18 +261,7 @@ async function main() {
       fetchGitHubJSON(process.env.GITHUB_JSON_RAW_URL),
     ]);
 
-    // console.log(
-    //   "last RSS build:",
-    //   rssFeed.lastBuildDate,
-    //   "number of RSS items",
-    //   rssFeed.items.length
-    // );
-
-    // rssFeed.items.forEach((item) =>
-    //   console.log(item.title, item.link, item.pubDate)
-    // );
-
-    // console.log(jsonLinks);
+    if (!rssFeed.items || !jsonLinks.length) return null;
 
     const newArticles = getNewArticles(rssFeed, jsonLinks);
 
@@ -272,16 +269,21 @@ async function main() {
 
     if (newArticles.length > 0) {
       // Process new links
-      await processArticles(newArticles);
+      const processedArticles = await processArticles(newArticles);
+
+      if (!processedArticles) return;
 
       // Update the GitHub JSON file
       const updatedLinks = [...newLinks, ...jsonLinks].slice(0, 50);
       await updateGitHubJSON(updatedLinks, process.env.GITHUB_PAT);
+
+      return updatedLinks;
     } else {
       console.log("No new articles.");
     }
   } catch (error) {
     console.error("main error:", error);
+    return null;
   }
 }
 
