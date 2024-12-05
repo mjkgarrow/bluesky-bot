@@ -12,6 +12,8 @@ const agent = new BskyAgent({
 async function fetchRSSFeed(url) {
   try {
     const feed = await parser.parseURL(url);
+    feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)); // sort by date, latest first so it publishes latest and then earliest
+
     return feed;
   } catch (error) {
     console.error("fetchRSSFeed error:", error);
@@ -194,11 +196,9 @@ async function processArticles(newArticles) {
       password: process.env.BLUESKY_PASSWORD,
     });
 
-    const newArticleData = await generateArticleData(newArticles);
+    const newArticleData = await generateArticleData(newArticles.reverse());
 
-    newArticleData
-      .reverse()
-      .forEach(async (article) => await postArticle(article));
+    newArticleData.forEach(async (article) => await postArticle(article));
 
     return newArticleData;
   } catch (error) {
@@ -253,18 +253,18 @@ async function main() {
       fetchGitHubJSON(process.env.GITHUB_JSON_RAW_URL),
     ]);
 
-    console.log(
-      "last RSS build:",
-      rssFeed.lastBuildDate,
-      "number of RSS items",
-      rssFeed.items.length
-    );
+    // console.log(
+    //   "last RSS build:",
+    //   rssFeed.lastBuildDate,
+    //   "number of RSS items",
+    //   rssFeed.items.length
+    // );
 
-    rssFeed.items.forEach((item) =>
-      console.log(item.title, item.link, item.pubDate)
-    );
+    // rssFeed.items.forEach((item) =>
+    //   console.log(item.title, item.link, item.pubDate)
+    // );
 
-    console.log(jsonLinks);
+    // console.log(jsonLinks);
 
     const newArticles = getNewArticles(rssFeed, jsonLinks);
 
