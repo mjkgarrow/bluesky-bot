@@ -253,7 +253,17 @@ async function main() {
       fetchGitHubJSON(process.env.GITHUB_JSON_RAW_URL),
     ]);
 
-    console.log(rssFeed.items);
+    console.log(
+      "last RSS build:",
+      rssFeed.lastBuildDate,
+      "number of RSS items",
+      rssFeed.items.length
+    );
+
+    rssFeed.items.forEach((item) =>
+      console.log(item.title, item.link, item.pubDate)
+    );
+
     console.log(jsonLinks);
 
     const newArticles = getNewArticles(rssFeed, jsonLinks);
