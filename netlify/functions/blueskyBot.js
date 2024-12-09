@@ -140,7 +140,12 @@ async function generateArticleData(feed) {
         imageBlob.contentType
       );
 
-      if (!imageData || !imageData.blob) return null;
+      if (!imageData || !imageData.blob) {
+        console.log(
+          `${title.slice(0, 20)} image didn't upload correctly, skipping`
+        );
+        return null;
+      }
 
       return {
         $type: "app.bsky.feed.post",
@@ -239,7 +244,10 @@ async function main() {
       fetchGitHubJSON(process.env.GITHUB_JSON_RAW_URL),
     ]);
 
-    if (!rssFeed.items || !jsonLinks.length) return null;
+    if (!rssFeed || !rssFeed.items.length || !jsonLinks.length) {
+      console.log("Error fetching RSS feed or github JSON");
+      return null;
+    }
 
     const newArticles = getNewArticles(rssFeed, jsonLinks);
 
@@ -253,7 +261,7 @@ async function main() {
         .map((item) => item.embed.external.uri);
 
       // Update the GitHub JSON file
-      const updatedLinks = [...postedArticleLinks, ...jsonLinks].slice(0, 50);
+      const updatedLinks = [...postedArticleLinks, ...jsonLinks].slice(0, 200);
       await updateGitHubJSON(updatedLinks, process.env.GITHUB_PAT);
 
       return updatedLinks;
