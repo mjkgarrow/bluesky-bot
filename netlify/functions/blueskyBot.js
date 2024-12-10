@@ -277,7 +277,7 @@ async function main() {
       const postedArticleLinks = processedArticles
         .filter((article) => article.success === true)
         .map((item) => ({
-          linK: item.embed.external.uri,
+          link: item.embed.external.uri,
           pubDate: item.createdAt,
         }));
 
