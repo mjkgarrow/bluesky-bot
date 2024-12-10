@@ -283,9 +283,9 @@ async function main() {
   }
 }
 
-main();
+// main();
 
-// export default async (req, _) => {
-//   const publishedArticles = await main();
-//   return Response.json({ articles: JSON.stringify(publishedArticles) });
-// };
+export default async (req, _) => {
+  const publishedArticles = await main();
+  return Response.json({ articles: JSON.stringify(publishedArticles) });
+};
