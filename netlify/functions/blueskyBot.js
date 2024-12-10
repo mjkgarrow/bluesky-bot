@@ -6,6 +6,8 @@ const sharp = require("sharp");
 
 require("dotenv").config();
 
+let posting = false;
+
 const agent = new AtpAgent({
   service: "https://bsky.social",
 });
@@ -254,6 +256,7 @@ async function main() {
     const newArticles = getNewArticles(rssFeed, jsonLinks);
 
     if (newArticles.length > 0) {
+      posting = true;
       console.log(
         `${newArticles.length} new articles found, attempting to post`
       );
@@ -286,6 +289,9 @@ async function main() {
 // main();
 
 export default async (req, _) => {
-  const publishedArticles = await main();
-  return Response.json({ articles: JSON.stringify(publishedArticles) });
+  if (!posting) {
+    await main();
+  }
+  // const publishedArticles = await main();
+  // return Response.json({ articles: JSON.stringify(publishedArticles) });
 };
