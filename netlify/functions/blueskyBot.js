@@ -37,9 +37,7 @@ async function fetchGitHubJSON(rawUrl) {
 }
 
 function getNewArticles(rssFeed, jsonLinks) {
-  const jsonLinksSet = new Set(
-    jsonLinks.filter((item) => !item.published).map((item) => item.link)
-  );
+  const jsonLinksSet = new Set(jsonLinks.map((item) => item.link));
   return rssFeed.items.filter((article) => !jsonLinksSet.has(article.link));
 }
 
@@ -285,9 +283,9 @@ async function main() {
   }
 }
 
-// main();
+main();
 
-export default async (req, _) => {
-  const publishedArticles = await main();
-  return Response.json({ articles: JSON.stringify(publishedArticles) });
-};
+// export default async (req, _) => {
+//   const publishedArticles = await main();
+//   return Response.json({ articles: JSON.stringify(publishedArticles) });
+// };
