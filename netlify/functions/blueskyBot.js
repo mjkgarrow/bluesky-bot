@@ -14,7 +14,7 @@ async function fetchRSSFeed(url) {
   try {
     const feed = await parser.parseURL(url);
 
-    feed.items.sort((a, b) => new Date(a.pubDate) - new Date(b.pubDate));
+    feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
 
     return feed;
   } catch (error) {
@@ -32,15 +32,25 @@ async function fetchGitHubJSON(rawUrl) {
     );
   } catch (error) {
     console.error("fetchGitHubJSON error:", error);
-    throw error;
+    return null;
   }
 }
 
 function getNewArticles(rssFeed, jsonLinks) {
-  const jsonLinksSet = new Set(jsonLinks);
-  return rssFeed.items
-    .filter((article) => !jsonLinksSet.has(article.link))
-    .reverse();
+  const now = new Date();
+
+  return rssFeed.items.filter((article) => {
+    const articlePubDate = new Date(article.pubDate);
+
+    // Check if the article is in the last 24 hours and its link is not in the JSON
+    const isPublishedInLast24Hours =
+      now - articlePubDate <= 24 * 60 * 60 * 1000;
+    const isLinkNotInJSON = !jsonLinks.some(
+      (jsonItem) => jsonItem.link === article.link
+    );
+
+    return isPublishedInLast24Hours && isLinkNotInJSON;
+  });
 }
 
 async function getImageBlob(link, title, maxSizeInBytes = 1024 * 1024) {
@@ -51,8 +61,14 @@ async function getImageBlob(link, title, maxSizeInBytes = 1024 * 1024) {
 
     if (!match || !match[1]) return null;
 
+    const baseImageUrl = match[1].split("?")[0];
+    const optimizedImageUrl = `${baseImageUrl}?xlib=rb-4.1.0&q=45&w=500&fit=crop&fm=webp`;
+
     // Fetch the image as a binary buffer
-    const response = await axios.get(match[1], { responseType: "arraybuffer" });
+    const response = await axios.get(optimizedImageUrl, {
+      responseType: "arraybuffer",
+    });
+
     let contentType = response.headers["content-type"];
 
     let imageBuffer = response.data;
@@ -117,52 +133,50 @@ async function uploadImgToBsky(imageBuffer, contentType) {
 }
 
 async function generateArticleData(feed) {
-  // First stage: Fetch all image blobs concurrently
-  const imageBlobPromises = feed.map((item) =>
-    getImageBlob(item.link, item.title)
-  );
+  const articles = [];
 
-  const imageBlobs = await Promise.all(imageBlobPromises);
+  for (let i = 0; i < feed.length; i++) {
+    const item = feed[i];
+    const link = item.link;
+    const title = item.title;
+    const summary = item.summary || title;
 
-  // Second stage: Process each resolved imageBlob
-  const articles = await Promise.all(
-    imageBlobs.map(async (imageBlob, index) => {
-      if (!imageBlob || !imageBlob.imageBuffer) return null;
+    const imageBlob = await getImageBlob(link, title);
 
-      const item = feed[index];
-      const link = item.link;
-      const title = item.title;
-      const summary = item.summary || title;
+    if (!imageBlob || !imageBlob.imageBuffer || !imageBlob.contentType) {
+      articles.push(null);
+      continue;
+    }
 
-      // Upload image to Bsky
-      const imageData = await uploadImgToBsky(
-        imageBlob.imageBuffer,
-        imageBlob.contentType
+    // Upload image to Bsky
+    const imageData = await uploadImgToBsky(
+      imageBlob.imageBuffer,
+      imageBlob.contentType
+    );
+
+    if (!imageData || !imageData.blob) {
+      console.log(
+        `${title.slice(0, 20)} image didn't upload correctly, skipping`
       );
+      articles.push(null);
+      continue;
+    }
 
-      if (!imageData || !imageData.blob) {
-        console.log(
-          `${title.slice(0, 20)} image didn't upload correctly, skipping`
-        );
-        return null;
-      }
-
-      return {
-        $type: "app.bsky.feed.post",
-        text: summary,
-        createdAt: new Date().toISOString(),
-        embed: {
-          $type: "app.bsky.embed.external",
-          external: {
-            uri: link,
-            title: title,
-            description: summary,
-            thumb: imageData.blob,
-          },
+    articles.push({
+      $type: "app.bsky.feed.post",
+      text: summary,
+      createdAt: new Date().toISOString(),
+      embed: {
+        $type: "app.bsky.embed.external",
+        external: {
+          uri: link,
+          title: title,
+          description: summary,
+          thumb: imageData.blob,
         },
-      };
-    })
-  );
+      },
+    });
+  }
 
   // Filter out any null results
   return articles.filter((article) => article !== null);
@@ -244,7 +258,7 @@ async function main() {
       fetchGitHubJSON(process.env.GITHUB_JSON_RAW_URL),
     ]);
 
-    if (!rssFeed || !rssFeed.items.length || !jsonLinks.length) {
+    if (!rssFeed || !rssFeed.items.length || !jsonLinks) {
       console.log("Error fetching RSS feed or github JSON");
       return null;
     }
@@ -252,13 +266,20 @@ async function main() {
     const newArticles = getNewArticles(rssFeed, jsonLinks);
 
     if (newArticles.length > 0) {
+      console.log(
+        `${newArticles.length} new articles found, attempting to post`
+      );
+
       // Process new links
       const processedArticles = await processArticles(newArticles);
 
       // extract the article links that were posted
       const postedArticleLinks = processedArticles
         .filter((article) => article.success === true)
-        .map((item) => item.embed.external.uri);
+        .map((item) => ({
+          linK: item.embed.external.uri,
+          pubDate: item.createdAt,
+        }));
 
       // Update the GitHub JSON file
       const updatedLinks = [...postedArticleLinks, ...jsonLinks].slice(0, 200);
