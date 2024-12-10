@@ -37,20 +37,10 @@ async function fetchGitHubJSON(rawUrl) {
 }
 
 function getNewArticles(rssFeed, jsonLinks) {
-  const now = new Date();
-
-  return rssFeed.items.filter((article) => {
-    const articlePubDate = new Date(article.pubDate);
-
-    // Check if the article is in the last 24 hours and its link is not in the JSON
-    const isPublishedInLast24Hours =
-      now - articlePubDate <= 24 * 60 * 60 * 1000;
-    const isLinkNotInJSON = !jsonLinks.some(
-      (jsonItem) => jsonItem.link === article.link
-    );
-
-    return isPublishedInLast24Hours && isLinkNotInJSON;
-  });
+  const jsonLinksSet = new Set(
+    jsonLinks.filter((item) => !item.published).map((item) => item.link)
+  );
+  return rssFeed.items.filter((article) => !jsonLinksSet.has(article.link));
 }
 
 async function getImageBlob(link, title, maxSizeInBytes = 1024 * 1024) {
@@ -278,7 +268,7 @@ async function main() {
         .filter((article) => article.success === true)
         .map((item) => ({
           link: item.embed.external.uri,
-          pubDate: item.createdAt,
+          published: true,
         }));
 
       // Update the GitHub JSON file
